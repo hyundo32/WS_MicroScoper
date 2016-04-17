@@ -1,0 +1,19 @@
+#pragma once
+
+#include "PowerPmacDevice.h"
+
+class CDeviceFactory
+{
+public:
+	CDeviceFactory(void);
+	virtual ~CDeviceFactory(void);
+
+	UINT				AddPowerPmacDevice(DWORD dwIPAddress, INT nPortNo);
+	UINT				DeletePowerPmacDevice(UINT uDeviceID);
+	CPowerPmacDevice*	GetPowerPmacDevice(UINT uDeviceID);
+
+private:
+	typedef CMSSmartPtrT<CPowerPmacDevice>						CPowerPmacDeviceT;
+	CFSPRefObjVectorT<CPowerPmacDeviceT, CPowerPmacDeviceT&>	m_aPowerPmacDevice;
+};
+

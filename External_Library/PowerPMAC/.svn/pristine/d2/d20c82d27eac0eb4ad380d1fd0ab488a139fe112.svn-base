@@ -1,0 +1,93 @@
+#include "stdafx.h"
+
+#include "FSPRefObject.h"
+//#include "FSPSingleton.h"
+
+CFSPRefObject::CFSPRefObject(void) : _nRefCounts(1)
+{
+}
+
+CFSPRefObject::CFSPRefObject(const char* strObjectName) : _nRefCounts(1)
+{
+    SetRefObjectName(strObjectName);
+}
+
+
+CFSPRefObject::~CFSPRefObject(void)
+{
+}
+
+short CFSPRefObject::AddRef()
+{
+    //  CMSMutex::sLock();
+
+    _nRefCounts++;
+
+    //  CMSMutex::sUnlock();
+
+    return _nRefCounts;
+}
+
+void CFSPRefObject::Release()
+{
+    //  CMSMutex::sLock();
+
+    int lRef = --_nRefCounts;
+
+    //  ASSERT(lRef >= 0);
+
+    if (lRef == 0)
+    {
+        //  CMSMutex::sUnlock();
+        delete this;
+    }
+
+    //  CMSMutex::sUnlock();
+}
+
+short CFSPRefObject::GetRefCount()
+{
+    return _nRefCounts;
+}
+
+long CFSPRefObject::QueryInterface(EtREFIID uIID, void** ppObj)
+{
+    uIID    = 0;
+    *ppObj  = NULL;
+
+    return 0;
+}
+
+void CFSPRefObject::SetRefObjectName(const char* strObjectName)
+{
+    _strObjectName = strObjectName;
+}
+
+const std::string& CFSPRefObject::GetRefObjectName() const
+{
+    return _strObjectName;
+}
+
+// 날짜: 2009/8/24
+// 작성: 김만수(kmansoo@nate.com)
+// 설명: 일반 객체를 참조형 객체로 만듦
+template <class _PInterface>
+bool CFSPRefObject::createInstance(_PInterface** ppv)
+{
+    *ppv = new CFSPRefObjectT<_PInterface>;
+
+    return true;
+}
+
+/* ====================================================================
+ *  File: FSPRefObject.cpp
+ *
+ *  Desc:
+ *     참조형 객체 구현
+ *  
+ *  Author:
+ *      김만수(kmansoo@nate.com)
+ *
+ *  Date:
+ *      2007/11/20
+ */

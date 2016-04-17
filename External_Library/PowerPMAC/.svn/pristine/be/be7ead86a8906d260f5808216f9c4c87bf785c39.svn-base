@@ -1,0 +1,201 @@
+#ifndef	__FSP_SINGLETON_H__
+#define	__FSP_SINGLETON_H__
+
+#include "FSPRefObject.h"
+
+// 날짜: 2009/8/24
+// 작성: 김만수(kmansoo@nate.com)
+// 설명: CFSPSingletonManager와 동시에 사용해야 한다.
+//       메모리 누수 현상 및 Singleton 올바른 참조를 위해 Singleton 객체 관리가 필요
+template <class T> 
+class CFSPSingletonT : public T
+{
+private:
+    static T* s_pInstance;
+
+public:    
+    static T* getInstance()
+    {
+        if (s_pInstance == NULL) 
+        {
+            s_pInstance = new CFSPSingletonT;
+
+            // 날짜: 2009-7-27
+            // 작성: 김만수(kmansoo@nate.com)
+            // 설명: 만일 Singleton Object Manager가 외부에서 생성되어, Singleton 객체 관리를
+            //       원한다면, 모든 생성되는 객체들을 관리자에게 추가한다.
+            CFSPSingletonManager* pSOM = CFSPSingletonManager::getInstance();
+
+            if (pSOM)
+                pSOM->AppendObject(s_pInstance);
+            ////////////////////////////////////////////////////////////////////////////////////
+        }
+
+        return s_pInstance;
+    };
+
+protected:
+    CFSPSingletonT() {};
+
+public:
+    virtual ~CFSPSingletonT() {}
+
+public:
+    virtual short	AddRef()                {return T::AddRef(); }
+    virtual void	Release()               {T::Release(); }
+    virtual short	GetRefCount()           {return T::GetRefCount(); }
+};
+
+//! static class member initialisation.
+template <class T> T* CFSPSingletonT<T>::s_pInstance = (T*)NULL;
+//---------------------------------------------------------------
+
+
+#define FSP_SINGLETON_IMPL(T) \
+    private: \
+        static T* s_pInstance2; \
+    public: \
+        static T* getInstance(){\
+            if(s_pInstance2 == NULL)    \
+                s_pInstance2 = CFSPSingletonT<T>::getInstance();\
+                \
+            return s_pInstance2;\
+        };
+
+#define FSP_SINGLETON_IMPL_END(T) \
+    T* T::s_pInstance2 = (T*)NULL;
+
+/*
+
+//  작성: 김만수(kmansoo@nate.com), 2008.06.25
+//  설명: 특정 컴파일러에서 이 template이 컴파일 되지 않을 수 있다.
+
+template <class T, class baseC>
+class CFSPSingletonExT : public baseC
+{
+protected:
+    CFSPSingletonExT() {}
+
+private:
+    static T* s_pInstance;
+
+public:
+    virtual ~CFSPSingletonExT() {}
+
+public:
+    static T* getInstance();
+};
+
+template <class T, class baseC>
+T* CFSPSingletonExT<T, baseC>::getInstance()
+{
+    if (s_pInstance == NULL) 
+        s_pInstance = CFSPSingletonT<T>::getInstance();
+
+    return s_pInstance;
+}
+
+//! static class member initialisation.
+template <class T, class baseC> T* CFSPSingletonExT<T, baseC>::s_pInstance = (T*)NULL;
+//---------------------------------------------------------------
+
+*/
+
+/////////////////////////////////////////////////////
+template <class T>
+class CFSPRefObjectT : public T, public CFSPRefObject
+{
+public:
+    CFSPRefObjectT(void);
+    virtual ~CFSPRefObjectT(void);
+
+public:
+    template <class _PInterface>
+    static bool createInstance(_PInterface** ppv)
+    {
+        if (*ppv != NULL)
+            return false;
+
+        CFSPRefObjectT* pNew = new CFSPRefObjectT();
+
+        if (pNew)
+        {
+            *ppv = static_cast<_PInterface>(pNew);
+            return true;
+        }
+
+        return false;
+    }
+
+    template <class _PInterface>
+    static bool createSingletonInstance(_PInterface** ppv)
+    {
+        if (*ppv != NULL)
+            return false;
+
+        CFSPRefObjectT* pNew = NULL;
+
+        pNew = CFSPSingletonT<CFSPRefObjectT>::getInstance();
+
+        if (pNew == NULL)
+            pNew = CFSPSingletonT<CFSPRefObjectT>::createInstance();
+        else
+            pNew->AddRef();
+
+        if (pNew)
+        {
+            *ppv = static_cast<_PInterface>(pNew);
+            return true;
+        }
+
+        return false;
+    }
+
+};
+
+template <class T>
+CFSPRefObjectT<T>::CFSPRefObjectT(void)
+{
+}
+
+template <class T>
+CFSPRefObjectT<T>::~CFSPRefObjectT(void)
+{
+}
+
+template <class _Base, class _PInterface>
+bool createFSPRefObject(_PInterface** ppv)
+{
+    return CFSPRefObjectT<_Base>::createInstance(ppv);
+}
+
+template <class _Base, class _PInterface>
+bool createSingletonDSRefObject(_PInterface** ppv)
+{
+    return CFSPRefObjectT<_Base>::createSingletonInstance(ppv);
+}
+
+#endif
+
+/* ====================================================================
+ * The Aprotech Software License, Version 1.0 
+ * Copyright (c) 2009 Aprotech, Inc.  All rights reserved.
+ * ====================================================================
+ *
+ *  파일명: FSPSingleton.h
+ *
+ *  설명: 
+ *      Singleton 객체 생성
+ * 
+ *  작성자:
+ *      김만수(kmansoo@nate.com)
+ *
+ *  날짜:
+ *      2009-7-27
+ */
+
+// -----------------------------------------------------------
+// 추가: 2009-7-27 16:57:32, 작성자: 김만수(kmansoo@nate.com)
+// -----------------------------------------------------------
+// * Singleton 객체가 생성될 때 Singleton Manager에 의해 관리되도록 수정
+//

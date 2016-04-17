@@ -1,0 +1,79 @@
+#include "StdAfx.h"
+#include "DeviceFactory.h"
+
+#ifdef _WIN32_WCE
+	#pragma comment(lib,"ws2.lib")
+#else
+	#pragma comment (lib, "ws2_32.lib")
+#endif
+
+
+CDeviceFactory::CDeviceFactory(void)
+{
+	WSADATA		wsaData;
+
+	::WSAStartup(MAKEWORD(2, 2), &wsaData);
+
+	if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2)
+	{
+		::WSACleanup();
+		return;
+	}
+}
+
+
+CDeviceFactory::~CDeviceFactory(void)
+{
+	m_aPowerPmacDevice.Delete(0, m_aPowerPmacDevice.Size());
+
+	::WSACleanup();
+}
+
+UINT CDeviceFactory::AddPowerPmacDevice(DWORD dwIPAddress, INT nPortNo)
+{
+	CPowerPmacDeviceT	pPowerPmacDevice;
+	INT					i;
+
+	for (i = 0; i < m_aPowerPmacDevice.Size(); i++)
+	{
+		if ((UINT)i < m_aPowerPmacDevice[i]->GetDeviceID())
+		{
+			break;
+		}
+	}
+
+	pPowerPmacDevice.Attach(new CPowerPmacDevice(i, dwIPAddress, nPortNo));
+	m_aPowerPmacDevice.Add(pPowerPmacDevice);
+	pPowerPmacDevice	= NULL;
+
+	return i;
+}
+
+UINT CDeviceFactory::DeletePowerPmacDevice(UINT uDeviceID)
+{
+	INT		i;
+
+	for (i = 0; i < m_aPowerPmacDevice.Size(); i++)
+	{
+		if (uDeviceID == m_aPowerPmacDevice[i]->GetDeviceID())
+		{
+			m_aPowerPmacDevice.Delete(i);
+			return DS_Ok;
+		}
+	}
+
+	return DS_InvalidDevice;
+}
+
+CPowerPmacDevice* CDeviceFactory::GetPowerPmacDevice(UINT uDeviceID)
+{
+	INT		i;
+
+	for (i = 0; i < m_aPowerPmacDevice.Size(); i++)
+	{
+		if (uDeviceID == m_aPowerPmacDevice[i]->GetDeviceID())
+			return m_aPowerPmacDevice[i];
+	}
+
+	return NULL;
+}

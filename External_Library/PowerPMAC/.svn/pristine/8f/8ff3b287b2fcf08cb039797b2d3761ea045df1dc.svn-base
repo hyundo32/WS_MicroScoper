@@ -1,0 +1,662 @@
+#ifndef __FSP_VECTOR_H__
+#define __FSP_VECTOR_H__
+
+#include "MSSmartPtr.h"
+
+#define FSPVECT_nGrowBy	            3
+#define FSPVECT_nShrinkBy           5
+
+template <class T>
+class FSPVectorCompT
+{
+public:
+    FSPVectorCompT() {}
+    virtual ~FSPVectorCompT() {}
+
+public:
+    virtual int Comp(T) = 0;
+};
+
+//  !나중에 최적화 한다.
+
+//  일반 Type들을 Vector로 관리
+//  <주의>  CFSPRefObject로 선언된 것은 CFSPRefObjVectorT 벡터를 이용할 것!
+template <class T, class ARG_TYPE>
+class CFSPVectorT
+{
+public:
+    CFSPVectorT(int size = 0, int growBy = FSPVECT_nGrowBy, int shrinkBy = FSPVECT_nShrinkBy);
+
+    virtual ~CFSPVectorT(void);
+
+    void    operator = (CFSPVectorT<T, ARG_TYPE>& src);
+    T &	    operator[](int i);
+    T &	    GetAt(int i);
+    T       Pop();
+
+    int	    Append(int size, T * newbies);
+
+    int	    Add(ARG_TYPE newby);
+    int	    Insert(int start, ARG_TYPE newbie);
+    int	    Insert(int start, int size, T * newbies);
+
+    int	    Delete(int start, int size = 1);
+    int	    Delete(ARG_TYPE lookFor);
+    int     RemoveAt(int i);
+
+    void    Clear(void);
+    int     Size(void) const;
+
+    int	    FindIndex(ARG_TYPE lookFor);
+    int	    FindIndex(FSPVectorCompT<T> * Comp);
+
+    int	    SortIn(FSPVectorCompT<T> * Comp, ARG_TYPE newEl);
+    int	    SortOut(FSPVectorCompT<T> * Comp);
+
+    void    Show();
+
+protected:
+    virtual int	    Insure(int size, int base, int end);
+
+protected:
+    int     _nSize;
+    int	    _nVesselSize;
+    int	    _nGrowBy;
+    int	    _nShrinkBy;
+    T *	    _pVect;
+};
+
+template <class T, class ARG_TYPE>
+CFSPVectorT<T, ARG_TYPE>::CFSPVectorT(int size, int growBy, int shrinkBy)
+{
+    _nVesselSize    = _nSize = size;
+    _nGrowBy        = growBy;
+    _nShrinkBy      = shrinkBy;
+
+    if (size > 0)
+        _pVect = new T[size];
+    else
+        _pVect = NULL;
+}
+
+
+template <class T, class ARG_TYPE>
+CFSPVectorT<T, ARG_TYPE>::~CFSPVectorT()
+{
+    Clear();
+}
+
+template <class T, class ARG_TYPE>
+void CFSPVectorT<T, ARG_TYPE>::Clear()
+{
+    if (_pVect)
+    {
+        delete [] _pVect; 
+        _pVect = NULL;
+    }
+
+    _nVesselSize = _nSize = 0;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPVectorT<T, ARG_TYPE>::Size() const
+{
+    return _nSize;
+}
+
+template <class T, class ARG_TYPE>
+void CFSPVectorT<T, ARG_TYPE>::operator = (CFSPVectorT<T, ARG_TYPE>& src)
+{
+    Clear();
+
+    for (int i = 0; i < src.Size(); i++)
+        Add(src[i]);
+}
+
+template <class T, class ARG_TYPE>
+T & CFSPVectorT<T, ARG_TYPE>::operator[] (int i)
+{
+    if (i + 1 > _nSize)
+        Insure(i + 1, _nSize, _nSize);
+
+    return _pVect[i];
+}
+
+template <class T, class ARG_TYPE>
+T & CFSPVectorT<T, ARG_TYPE>::GetAt(int i)
+{
+    if (i + 1 > _nSize)
+        Insure(i + 1, _nSize, _nSize);
+
+    return _pVect[i];
+}
+
+template <class T, class ARG_TYPE>
+T CFSPVectorT<T, ARG_TYPE>::Pop()
+{
+    if (_nSize == 0)
+        return (T)NULL;
+
+    T pObj = _pVect[0];
+
+    Insure(_nSize - 1, 0, _nSize - 0 - 1);
+
+    return pObj;
+}
+
+
+//
+//  Move data around while doing re-allocation copy 
+//
+template <class T, class ARG_TYPE>
+int CFSPVectorT<T, ARG_TYPE>::Insure(int newSize, int base, int end)
+{
+    T *	newVect;
+
+    int newVesselSize = _nVesselSize;
+
+    if (newSize > _nVesselSize || _nVesselSize - newSize > _nShrinkBy) 
+    {
+        newVesselSize = newSize + _nGrowBy; //   we want some room after growth
+        /*	printf("Insure to %d/%d\n", newSize, newVesselSize); */
+        newVect = new T[newVesselSize];
+    } 
+    else
+        newVect = _pVect;
+
+    if (newVect == NULL)
+        return 0;
+
+    if (_pVect) 
+    {
+        int i;
+        for (i = 0; i < _nSize && i < base && newVect != _pVect; ++i)
+            newVect[i] = _pVect[i];
+
+        if (newSize < _nSize) 
+        {
+            for (i = 0; i < end; ++i)
+            {
+                newVect[newSize - end + i] = _pVect[_nSize - end + i];
+            }
+        } 
+        else 
+        {   
+            //  copy it backwords to avoid stepping on tail
+            for (i = end - 1; i >= 0; --i)
+            {
+                newVect[newSize - end + i] = _pVect[_nSize - end + i];
+            }
+        }
+
+        if (_pVect != newVect) // delete the old one if we're not
+            delete [] _pVect;  // moving data in the same element
+    }
+
+    _nVesselSize = newVesselSize;
+    _nSize = newSize;
+    _pVect = newVect;
+
+    return 1;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPVectorT<T, ARG_TYPE>::Insert(int start, ARG_TYPE newbie)
+{
+    // 날짜: 2009/9/3, 김만수(kmansoo@nate.com)
+    // 만일 벡터 크기보다 삽입되는 위치의 범위가 넘을 때?
+    if (start >= _nSize)
+        Insure(start + 1, start, _nSize - start);
+    else
+        Insure(_nSize + 1, start, _nSize - start);
+
+    _pVect[start] = newbie;
+
+    return 1;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPVectorT<T, ARG_TYPE>::Insert(int start, int size, T* newbies)
+{
+    // 날짜: 2009/9/3, 김만수(kmansoo@nate.com)
+    // 만일 벡터 크기보다 삽입되는 위치의 범위가 넘을 때?
+    if (start >= _nSize)
+        Insure(start + size, start, _nSize - start);
+    else
+        Insure(_nSize + size, start, _nSize - start);
+
+    for (int i = 0; i < size; ++i)
+        _pVect[start + i] = newbies[i];
+
+    return 1;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPVectorT<T, ARG_TYPE>::Append(int size, T* newbies)
+{
+    return Insert(_nSize, size, newbies);
+}
+
+template <class T, class ARG_TYPE>
+int CFSPVectorT<T, ARG_TYPE>::Add(ARG_TYPE newby)
+{
+    return Insert(_nSize, newby);
+}
+
+template <class T, class ARG_TYPE>
+int CFSPVectorT<T, ARG_TYPE>::Delete(int start, int size)
+{
+    Insure(_nSize - size, start, _nSize - start - size);
+    return 1;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPVectorT<T, ARG_TYPE>::Delete(ARG_TYPE lookFor)
+{
+    int i = FindIndex(lookFor);
+
+    if (i < 0)
+        return 0;
+
+    return Delete(i, 1);
+}
+
+
+template <class T, class ARG_TYPE>
+int CFSPVectorT<T, ARG_TYPE>::RemoveAt(int i)
+{
+    if (i < 0 || i >= _nSize)
+        return 0;
+
+    Insure(_nSize - 1, i, _nSize - i - 1);
+    return 1;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPVectorT<T, ARG_TYPE>::FindIndex(ARG_TYPE lookFor)
+{
+    for (int i = 0; i < _nSize; ++i)
+    {
+        if (_pVect[i] == lookFor)
+            return i;
+    }
+
+    return -1;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPVectorT<T, ARG_TYPE>::FindIndex(FSPVectorCompT<T> * Comp)
+{
+    int i, ret;
+
+    for (i = 0; i < _nSize; ++i) 
+    {
+        if ((ret = Comp->Comp(_pVect[i])) < 0)
+            return ret;
+
+        if (ret == 0)
+            break;
+    }
+
+    return i; // callers should check against size to see if at end
+}
+
+template <class T, class ARG_TYPE>
+int CFSPVectorT<T, ARG_TYPE>::SortIn(FSPVectorCompT<T> * Comp, ARG_TYPE newEl)
+{
+    int i = FindIndex(Comp);
+
+    if (i < 0)
+        return i;
+
+    Insert(i, newEl);
+
+    return 0;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPVectorT<T, ARG_TYPE>::SortOut(FSPVectorCompT<T> * Comp)
+{
+    int i = FindIndex(Comp);
+
+    if (i < 0)
+        return i;
+
+    Delete(i, 1);
+
+    return 0;
+}
+
+template <class T, class ARG_TYPE>
+void CFSPVectorT<T, ARG_TYPE>::Show()
+{
+    for (int i = 0; i < _nSize; ++i)
+        printf("%p[%d]: %p\n", _pVect, i, _pVect[i]);
+}
+
+//  일반 Type들을 Vector로 관리
+//  <주의>  CFSPRefObject로 선언된 것은 객체들 관리
+template <class T, class ARG_TYPE>
+class CFSPRefObjVectorT
+{
+public:
+    CFSPRefObjVectorT(int size = 0, int growBy = FSPVECT_nGrowBy, int shrinkBy = FSPVECT_nShrinkBy);
+
+    virtual ~CFSPRefObjVectorT(void);
+
+    void    operator = (CFSPRefObjVectorT<T, ARG_TYPE>& src);
+    T &	    operator[](int i);
+    T &	    GetAt(int i);
+
+    int	    Append(int size, T * newbies);
+
+    int	    Add(ARG_TYPE newby);
+    int	    Insert(int start, ARG_TYPE newbie);
+    int	    Insert(int start, int size, T * newbies);
+
+    int	    Delete(int start, int size = 1);
+    int	    Delete(ARG_TYPE lookFor);
+    int     RemoveAt(int i);
+
+    void    Clear(void);
+    int     Size(void) const;
+
+    int	    FindIndex(ARG_TYPE lookFor);
+    int	    FindIndex(FSPVectorCompT<T> * Comp);
+
+    int	    SortIn(FSPVectorCompT<T> * Comp, ARG_TYPE newEl);
+    int	    SortOut(FSPVectorCompT<T> * Comp);
+
+    void    Show();
+
+protected:
+    virtual int	    Insure(int size, int base, int end);
+
+protected:
+    int         _nSize;
+    int	        _nVesselSize;
+    int	        _nGrowBy;
+    int	        _nShrinkBy;
+    T *	        _pVect;
+};
+
+template <class T, class ARG_TYPE>
+CFSPRefObjVectorT<T, ARG_TYPE>::CFSPRefObjVectorT(int size, int growBy, int shrinkBy)
+{
+    _nVesselSize    = _nSize = size;
+    _nGrowBy        = growBy;
+    _nShrinkBy      = shrinkBy;
+
+    if (size > 0)
+        _pVect = new T[size];
+    else
+        _pVect = NULL;
+}
+
+
+template <class T, class ARG_TYPE>
+CFSPRefObjVectorT<T, ARG_TYPE>::~CFSPRefObjVectorT()
+{
+    Clear();
+}
+
+template <class T, class ARG_TYPE>
+void CFSPRefObjVectorT<T, ARG_TYPE>::Clear()
+{
+    if (_pVect)
+    {
+        delete [] _pVect; 
+        _pVect = NULL;
+    }
+
+    _nVesselSize = _nSize = 0;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPRefObjVectorT<T, ARG_TYPE>::Size() const
+{
+    return _nSize;
+}
+
+template <class T, class ARG_TYPE>
+void CFSPRefObjVectorT<T, ARG_TYPE>::operator = (CFSPRefObjVectorT<T, ARG_TYPE>& src)
+{
+    Clear();
+
+    for (int i = 0; i < src.Size(); i++)
+        Add(src[i]);
+}
+
+template <class T, class ARG_TYPE>
+T & CFSPRefObjVectorT<T, ARG_TYPE>::operator[] (int i)
+{
+    if (i + 1 > _nSize)
+        Insure(i + 1, _nSize, _nSize);
+
+    return _pVect[i];
+}
+
+template <class T, class ARG_TYPE>
+T & CFSPRefObjVectorT<T, ARG_TYPE>::GetAt(int i)
+{
+    if (i + 1 > _nSize)
+        Insure(i + 1, _nSize, _nSize);
+
+    return _pVect[i];
+}
+
+//
+//  Move data around while doing re-allocation copy 
+//
+template <class T, class ARG_TYPE>
+int CFSPRefObjVectorT<T, ARG_TYPE>::Insure(int newSize, int base, int end)
+{
+    T *	newVect;
+
+    int newVesselSize = _nVesselSize;
+
+    if (newSize > _nVesselSize || _nVesselSize - newSize > _nShrinkBy) 
+    {
+        newVesselSize = newSize + _nGrowBy; //   we want some room after growth
+        /*	printf("Insure to %d/%d\n", newSize, newVesselSize); */
+        newVect = new T[newVesselSize];
+    } 
+    else
+        newVect = _pVect;
+
+    if (newVect == NULL)
+        return 0;
+
+    if (_pVect) 
+    {
+        int i;
+        for (i = 0; i < _nSize && i < base && newVect != _pVect; ++i)
+            newVect[i] = _pVect[i];
+
+        if (newSize < _nSize) 
+        {
+            for (i = 0; i < end; ++i)
+            {
+                newVect[newSize - end + i] = _pVect[_nSize - end + i];
+
+                _pVect[_nSize - end + i] = NULL;    //  add, 2005.12.26
+            }
+
+            if (i == 0)
+                _pVect[base] = NULL;    //  add, 2005.12.26
+        } 
+        else 
+        {   
+            //  copy it backwords to avoid stepping on tail
+            for (int i = end - 1; i >= 0; --i)
+            {
+                newVect[newSize - end + i] = _pVect[_nSize - end + i];
+
+                _pVect[_nSize - end + i] = NULL;    //  add, 2005.12.26
+            }
+        }
+
+        if (_pVect != newVect) // delete the old one if we're not
+            delete [] _pVect;  // moving data in the same element
+    }
+
+    _nVesselSize = newVesselSize;
+    _nSize = newSize;
+    _pVect = newVect;
+
+    return 1;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPRefObjVectorT<T, ARG_TYPE>::Insert(int start, ARG_TYPE newbie)
+{
+    // 날짜: 2009/9/3, 김만수(kmansoo@nate.com)
+    // 만일 벡터 크기보다 삽입되는 위치의 범위가 넘을 때?
+    if (start >= _nSize)
+        Insure(start + 1, start, _nSize - start);
+    else
+        Insure(_nSize + 1, start, _nSize - start);
+
+    _pVect[start] = newbie;
+
+    return 1;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPRefObjVectorT<T, ARG_TYPE>::Insert(int start, int size, T* newbies)
+{
+    // 날짜: 2009/9/3, 김만수(kmansoo@nate.com)
+    // 만일 벡터 크기보다 삽입되는 위치의 범위가 넘을 때?
+    if (start >= _nSize)
+        Insure(start + size, start, _nSize - start);
+    else
+        Insure(_nSize + size, start, _nSize - start);
+
+    for (int i = 0; i < size; ++i)
+        _pVect[start + i] = newbies[i];
+
+    return 1;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPRefObjVectorT<T, ARG_TYPE>::Append(int size, T* newbies)
+{
+    return Insert(_nSize, size, newbies);
+}
+
+template <class T, class ARG_TYPE>
+int CFSPRefObjVectorT<T, ARG_TYPE>::Add(ARG_TYPE newby)
+{
+    return Insert(_nSize, newby);
+}
+
+template <class T, class ARG_TYPE>
+int CFSPRefObjVectorT<T, ARG_TYPE>::Delete(int start, int size)
+{
+    Insure(_nSize - size, start, _nSize - start - size);
+    return 1;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPRefObjVectorT<T, ARG_TYPE>::Delete(ARG_TYPE lookFor)
+{
+    int i = FindIndex(lookFor);
+
+    if (i < 0)
+        return 0;
+
+    return Delete(i, 1);
+}
+
+
+template <class T, class ARG_TYPE>
+int CFSPRefObjVectorT<T, ARG_TYPE>::RemoveAt(int i)
+{
+    if (i < 0 || i >= _nSize)
+        return 0;
+
+    Insure(_nSize - 1, i, _nSize - i - 1);
+    return 1;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPRefObjVectorT<T, ARG_TYPE>::FindIndex(ARG_TYPE lookFor)
+{
+    int nFindPos = -1;
+
+    for (int i = 0; i < _nSize; ++i)
+    {
+        if (_pVect[i] == lookFor)
+        {
+            nFindPos = i;
+            break;
+        }
+    }
+
+    return nFindPos;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPRefObjVectorT<T, ARG_TYPE>::FindIndex(FSPVectorCompT<T> * Comp)
+{
+    int i, ret;
+
+    for (i = 0; i < _nSize; ++i) 
+    {
+        if ((ret = Comp->Comp(_pVect[i])) < 0)
+            return ret;
+
+        if (ret == 0)
+            break;
+    }
+
+    return i; // callers should check against size to see if at end
+}
+
+template <class T, class ARG_TYPE>
+int CFSPRefObjVectorT<T, ARG_TYPE>::SortIn(FSPVectorCompT<T> * Comp, ARG_TYPE newEl)
+{
+    int i = FindIndex(Comp);
+
+    if (i < 0)
+        return i;
+
+    Insert(i, newEl);
+
+    return 0;
+}
+
+template <class T, class ARG_TYPE>
+int CFSPRefObjVectorT<T, ARG_TYPE>::SortOut(FSPVectorCompT<T> * Comp)
+{
+    int i = FindIndex(Comp);
+
+    if (i < 0)
+        return i;
+
+    Delete(i, 1);
+
+    return 0;
+}
+
+template <class T, class ARG_TYPE>
+void CFSPRefObjVectorT<T, ARG_TYPE>::Show()
+{
+    for (int i = 0; i < _nSize; ++i)
+        printf("%p[%d]: %p\n", _pVect, i, _pVect[i]);
+}
+
+#endif
+
+/* ====================================================================
+ *  File: FSPVector.h
+ *
+ *  Desc:
+ *     Vector template 선언, 참조형 객체는 CFSPRefVector를 사용할 것!
+ *  
+ *  Author:
+ *      김만수(kmansoo@nate.com)
+ *
+ *  Date:
+ *      2007/11/20
+ */

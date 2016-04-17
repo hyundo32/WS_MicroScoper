@@ -1,0 +1,242 @@
+#ifndef	__MS_SMART_PTR_H__
+#define	__MS_SMART_PTR_H__
+
+//#include "FSPTypes.h"
+#include "FSPRefObject.h"
+
+/**
+ *  Smart Pointer
+ *
+ *  CMSSmartPtr은 CFSPRefObject을 상속받은 클래스만 적용 가능
+ */
+ 
+template <class T> 
+class CMSSmartPtrT
+{
+private:
+    T* _pMyPtr;
+
+private:
+    void SafeAddRef()
+    {
+        if (_pMyPtr) 
+            _pMyPtr->AddRef();
+    }
+
+    void SafeRelease()
+    {
+        if (_pMyPtr)
+        {
+            _pMyPtr->Release();
+            _pMyPtr = NULL;
+        }
+    }
+
+public:
+	CMSSmartPtrT()  throw() 
+	{
+		_pMyPtr = NULL;
+	}
+
+    // 2010.12.22, 김만수(kmansoo@nate.com)
+    // bAttachObj   = true,  refCount 증가 안함
+    //              = false, refCount 1증가
+	CMSSmartPtrT(T* p_, bool bAttachObj)
+	{
+		_pMyPtr = p_;
+
+		if (bAttachObj == false)
+		{
+			if (_pMyPtr)
+				_pMyPtr->AddRef(); 
+		}
+	}
+
+    ~CMSSmartPtrT(void) 
+	{
+		if (_pMyPtr)
+			_pMyPtr->Release(); 
+	}
+
+	void Attach(T* p_)
+	{
+		if (_pMyPtr)
+			_pMyPtr->Release(); 
+
+		_pMyPtr = p_; 		
+	}
+
+	T* Detach()
+	{
+        T* pOldPtr = _pMyPtr;
+
+		_pMyPtr = NULL;
+
+        return pOldPtr;
+	}
+
+	operator T*(void)			{ return _pMyPtr;	}
+
+    bool operator == (const CMSSmartPtrT& other) const
+    { 
+        return _pMyPtr == (const T*)other._pMyPtr; 
+    }
+
+    bool operator != (const CMSSmartPtrT& other) const
+    { 
+        return _pMyPtr != (const T*)other._pMyPtr; 
+    }
+
+    bool operator ==(T* pT) const
+	{ 
+		return _pMyPtr == pT;
+	}
+
+    bool operator !=(T* pT) const
+	{ 
+		return _pMyPtr != pT;
+	}
+
+    T *GetPtr() const
+    {
+        return const_cast<CMSSmartPtrT *>(this)->_pMyPtr;
+    }
+
+    T& operator*(void)		{ return *_pMyPtr;	}
+    T* operator->(void)		{ return _pMyPtr;	}
+    T** operator&(void)		{ return &_pMyPtr;	}
+
+
+    /*
+        CMSSmartPtrT& operator = (CMSSmartPtrT<T> &p_)
+	    {
+		    return operator = ((T *) p_);
+	    }
+    */
+    CMSSmartPtrT& operator = (const CMSSmartPtrT &src)
+	{
+        if (_pMyPtr != src._pMyPtr)
+        {
+            SafeRelease();
+            _pMyPtr = src._pMyPtr;
+            SafeAddRef();
+        }
+        return *this;
+    }
+
+    CMSSmartPtrT& operator = (T* p_) 
+	{
+		if (_pMyPtr)
+			_pMyPtr->Release(); 
+
+		_pMyPtr = p_; 
+
+		if (_pMyPtr)
+			_pMyPtr->AddRef(); 
+		
+		return *this;
+    }
+
+};
+
+
+/**
+ *
+ *  Scope 단위로 객체의 lifetime을 관리해 주는 smart pointer.
+ */
+ 
+template <typename _Type>
+class CMSScopedPtr
+{
+public:
+    typedef _Type element_type;
+
+    /** Constructor. */
+    CMSScopedPtr(_Type* p = 0) : _p(p) {}
+
+    /** Copy Constructor. Transfer ownership of the pointer stored in other. */
+    CMSScopedPtr(CMSScopedPtr const & other) : _p(other.Get())
+    { const_cast<CMSScopedPtr*>(&other)->Release(); }
+
+    /** Destructor. */
+    ~CMSScopedPtr(void)
+    { delete _p; }
+
+    /** Copy Constructor. Transfer ownership of the pointer stored in other. */
+    template <typename _T1>
+    CMSScopedPtr(CMSScopedPtr<_T1>& other) : _p(other.Release()) {}
+
+    /** Returns the stored pointer. */
+    _Type* Get() const { return _p; }
+
+    /** Delete Get() only if Get() != p and store p. */
+    void Reset(_Type* p = 0)
+    {
+        if (p == _p) return;
+        CMSScopedPtr(p).swap(*this);
+    }
+
+    /**
+        Give up the ownership of the stored pointer and replace it with null
+        pointer.
+        @return the previously stored pointer
+    */
+    _Type* Release()
+    {
+        _Type* p = _p;
+        _p = NULL;
+        return p;
+    }
+
+    void swap(CMSScopedPtr& other)
+    {
+        _Type* p = other._p;
+        other._p = _p;
+        _p = p;
+    }
+
+    /** Dereferencing operator. */
+    _Type& operator* ()    { FSP_ASSERT(_p != NULL); return *_p; }
+
+    /** member access operator. */
+    _Type* operator-> ()        { FSP_ASSERT(_p != NULL); return _p; }
+    _Type* operator-> () const  { FSP_ASSERT(_p != NULL); return _p; }
+
+    operator bool () const  { return _p != 0; }
+    bool operator ! () const     { return _p == 0; }
+
+    /** Equality operator */
+    bool operator == (CMSScopedPtr const & other) const
+    { return _p == other._p; }
+
+    bool operator == (_Type const * p) const
+    { return _p == p; }
+
+    bool operator != (CMSScopedPtr const & other) const
+    { return _p != other._p; }
+
+    bool operator != (_Type const * p) const
+    { return _p != p; }
+
+private:
+    _Type* _p;
+};
+
+#endif
+
+/* ====================================================================
+ * The Aprotech Software License, Version 1.0 
+ * Copyright (c) 2009 Aprotech, Inc.  All rights reserved.
+ * ====================================================================
+ *
+ *  파일명: MSSmartPtr.h
+ *
+ *  설명: 
+ *      스마트 포인터 정의
+ * 
+ *  작성자:
+ *      김만수(kmansoo@nate.com)
+ *
+ *  날짜:
+ *      2009-7-27
+ */

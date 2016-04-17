@@ -1,0 +1,54 @@
+// PPMACComm.h: interface for the CPowerPmacDevice class.
+//
+//////////////////////////////////////////////////////////////////////
+
+#if !defined(AFX_PPMACCOMM_H__A83326B5_C360_4D69_AC94_713F94DA71B7__INCLUDED_)
+#define AFX_PPMACCOMM_H__A83326B5_C360_4D69_AC94_713F94DA71B7__INCLUDED_
+
+#if _MSC_VER > 1000
+#pragma once
+#endif // _MSC_VER > 1000
+
+#include <winsock2.h>
+#include "PowerPmacDef.h"
+#include "FSPRefObject.h"
+#include "FSPVector.h"
+
+#define IAC		0xFF
+#define DONT	0xFE
+#define DO		0xFD
+#define WONT	0xFC
+#define WILL	0xFB
+
+class CPowerPmacDevice : public CFSPRefObject
+{
+public:
+	CPowerPmacDevice(UINT uDeviceID, DWORD dwIPAddress, INT nPortNo);
+	virtual ~CPowerPmacDevice();
+
+	VOID	SetDeviceID(UINT uDeviceID);
+	UINT	GetDeviceID();
+
+	UINT	Connect();
+	UINT	Disconnect();
+	UINT	IsConnected(PBOOL pConnected);
+
+	UINT	GetResponseA(LPSTR lpCommand, LPSTR lpResponse, INT nLength);
+	UINT	GetResponseW(LPWSTR lpwCommand, LPWSTR lpwResponse, INT nLength);
+	UINT	SendCommandA(LPSTR lpCommand);
+	UINT	SendCommandW(LPWSTR lpwCommand);
+
+private:
+	VOID Lock();
+	VOID Unlock();
+
+private:
+	UINT		m_uDeviceID;
+	DWORD		m_dwIPAddress;
+	INT			m_nPortNo;
+	BOOL		m_bConnected;
+	HANDLE		m_hMutex;
+	SOCKET*		m_ppmacSock;
+};
+
+#endif // !defined(AFX_PPMACCOMM_H__A83326B5_C360_4D69_AC94_713F94DA71B7__INCLUDED_)

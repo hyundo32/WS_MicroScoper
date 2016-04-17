@@ -1,0 +1,698 @@
+// PPMACComm.cpp: implementation of the CPowerPmacDevice class.
+//
+//////////////////////////////////////////////////////////////////////
+
+#include "stdafx.h"
+#include "PowerPmacDevice.h"
+#include <atlstr.h> 
+
+
+//////////////////////////////////////////////////////////////////////
+// Construction/Destruction
+//////////////////////////////////////////////////////////////////////
+
+CPowerPmacDevice::CPowerPmacDevice(UINT uDeviceID, DWORD dwIPAddress, INT nPortNo)
+{
+	TCHAR				tszBuffer[256];
+
+	m_ppmacSock			= NULL;
+	m_uDeviceID			= uDeviceID;
+	m_bConnected		= FALSE;
+	m_hMutex			= NULL;
+	m_dwIPAddress		= dwIPAddress;
+	m_nPortNo			= nPortNo;
+
+	_stprintf_s(tszBuffer, _countof(tszBuffer), _T("MutexPPMACLib-%08X"), dwIPAddress);
+	m_hMutex = CreateMutex(NULL, FALSE, tszBuffer);
+}
+
+CPowerPmacDevice::~CPowerPmacDevice()
+{
+	Disconnect();
+}
+
+VOID CPowerPmacDevice::SetDeviceID(UINT uDeviceID)
+{
+	m_uDeviceID	= uDeviceID;
+}
+
+UINT CPowerPmacDevice::GetDeviceID()
+{
+	return m_uDeviceID;
+}
+
+UINT CPowerPmacDevice::Connect()
+{
+	struct sockaddr_in sin;
+	int rc = 0;
+	int iTimeout = 1000;	// 1000 msec
+	int nLoopCnt = 0;
+
+	if ( m_bConnected )
+		return DS_Failed;
+
+	Lock();
+
+	if ( m_ppmacSock==NULL )
+	{
+		m_ppmacSock = new SOCKET;
+	}
+
+	*m_ppmacSock = socket(PF_INET, SOCK_STREAM, 0);
+
+	if ( *m_ppmacSock==INVALID_SOCKET )
+	{
+		WSACleanup();
+		// TRACE("CPowerPmacDevice::Error, Cannot create socket!\n");
+		Unlock();
+		return DS_Failed;
+	}
+
+	sin.sin_addr.s_impno	= (char)(0x000000FF & m_dwIPAddress);
+	sin.sin_addr.s_lh		= (char)((0x0000FF00 & m_dwIPAddress) >> 8);
+	sin.sin_addr.s_host		= (char)((0x00FF0000 & m_dwIPAddress) >> 16);
+	sin.sin_addr.s_net		= (char)((0xFF000000 & m_dwIPAddress) >> 24);
+	sin.sin_family	= PF_INET;
+
+	sin.sin_port	= htons(m_nPortNo);
+
+	rc = setsockopt( *(SOCKET*)m_ppmacSock,
+					SOL_SOCKET,
+					SO_RCVTIMEO,
+					(const char *)&iTimeout,
+					sizeof(int));
+	rc = connect(*m_ppmacSock, (struct sockaddr*)&sin, sizeof(sin));
+	if ( rc==SOCKET_ERROR )
+	{
+		// TRACE("CPowerPmacDevice::Error, Cannot open linux side telent port!\n");
+		Unlock();
+		return DS_Failed;
+	}
+
+	// Telnet negotiation
+	BYTE buff[1024];
+	BOOL bDone = FALSE;
+	BOOL bSuccess = FALSE;
+
+	while(!bDone)
+	{
+		rc = recv(*(SOCKET*)m_ppmacSock, (char *)buff, 3, 0);	
+		if ( rc==SOCKET_ERROR )
+		{
+			// TRACE("CPowerPmacDevice::Error, Telent negotiation receive error!\n");
+			bDone = TRUE;
+			continue;
+		}
+
+		if ( buff[0]!=IAC )
+		{
+			// TRACE("CPowerPmacDevice::Msg, Telnet negotiation succeeded!\n");
+			bDone = TRUE;
+			bSuccess = TRUE;
+			continue;
+		}
+		else if ( buff[1]==DO )
+		{
+			buff[1] = WONT;
+			rc = send(*(SOCKET*)m_ppmacSock, (char *)buff, 3, 0);
+			if ( rc==SOCKET_ERROR )
+			{
+				// TRACE("CPowerPmacDevice::Error, Telnet negotiation send error!\n");
+				bDone = TRUE;
+				continue;
+			}
+		}
+	}
+
+	if ( bSuccess )
+	{
+		iTimeout = 500;	// 500 msec
+		rc = setsockopt( *(SOCKET*)m_ppmacSock,
+						SOL_SOCKET,
+						SO_RCVTIMEO,
+						(const char *)&iTimeout,
+						sizeof(int));
+
+		char *tempRecv = (char *)&buff[0];
+		int nCheckIndex = 0;
+
+		// login process
+		
+		// 1. 연결 메시지 Prompt를 읽어옵니다. ( check for : "login as: " )
+		nLoopCnt = 0;
+		bDone = FALSE;
+		while(!bDone && (nLoopCnt++<10))
+		{
+			rc = recv(*(SOCKET*)m_ppmacSock, (char *)tempRecv, 1023, 0);
+			if ( rc==SOCKET_ERROR )
+			{
+				if ( WSAGetLastError()!=WSAETIMEDOUT )
+				{
+					Unlock();
+					return DS_Failed;
+				}
+			}
+
+			if ( rc!=SOCKET_ERROR )
+			{
+				tempRecv += rc;
+				nCheckIndex += rc;
+			}
+
+			if ( (nCheckIndex>=2) && (buff[nCheckIndex-2]==':') && (buff[nCheckIndex-1]==' ') )
+				bDone = TRUE;
+		}
+		if ( bDone==FALSE )
+		{
+			Unlock();
+			return DS_Failed;
+		}
+
+		// 2. 계정을 입력합니다.
+		sprintf_s((char *)buff, _countof(buff), "%s\n", "root");
+		rc = send(*(SOCKET*)m_ppmacSock, (char*)buff, strlen((char*)buff), 0);
+		if ( rc==SOCKET_ERROR )
+		{
+			// TRACE("CPowerPmacDevice::Login user account send error!\n");
+			Unlock();
+			return DS_Failed;
+		}
+		// check for ( "root" + 0x0D + 0x0A )
+		tempRecv = (char *)&buff[0];
+		nCheckIndex = 0;
+		nLoopCnt = 0;
+		bDone = FALSE;
+		while(!bDone && (nLoopCnt++<10))
+		{
+			rc = recv(*(SOCKET*)m_ppmacSock, (char *)tempRecv, 1023, 0);
+			if ( rc==SOCKET_ERROR )
+			{
+				if ( WSAGetLastError()!=WSAETIMEDOUT )
+				{
+					Unlock();
+					return DS_Failed;
+				}
+			}
+
+			if ( rc!=SOCKET_ERROR )
+			{
+				tempRecv += rc;
+				nCheckIndex += rc;
+			}
+
+//			if ( (nCheckIndex>=3) && (buff[nCheckIndex-3]=='t') && (buff[nCheckIndex-2]=='\r') && (buff[nCheckIndex-1]=='\n') )
+			if ( (nCheckIndex>=6) && (_strnicmp((char *)&buff[0], "root\r\n", 6)==0 ) )
+				bDone = TRUE;
+		}
+		if ( bDone==FALSE )
+		{
+			Unlock();
+			return DS_Failed;
+		}
+
+		// check for ( "password: " )
+		tempRecv = (char *)&buff[0];
+		nCheckIndex = 0;
+		nLoopCnt = 0;
+		bDone = FALSE;
+		while(!bDone && (nLoopCnt++<10))
+		{
+			rc = recv(*(SOCKET*)m_ppmacSock, (char *)tempRecv, 1023, 0);
+			if ( rc==SOCKET_ERROR )
+			{
+				if ( WSAGetLastError()!=WSAETIMEDOUT )
+				{
+					Unlock();
+					return DS_Failed;
+				}
+			}
+
+			if ( rc!=SOCKET_ERROR )
+			{
+				tempRecv += rc;
+				nCheckIndex += rc;
+			}
+
+			if ( (nCheckIndex>=10) && (_strnicmp((char *)&buff[0], "password: ", 10)==0 ) )
+				bDone = TRUE;
+		}
+		if ( bDone==FALSE )
+		{
+			Unlock();
+			return DS_Failed;
+		}
+
+		// 3. 패스워드를 입력합니다.
+		nLoopCnt = 0;
+		bDone = FALSE;
+
+		sprintf_s((char *)buff, _countof(buff), "%s\n", "deltatau");
+		rc = send(*(SOCKET*)m_ppmacSock, (char*)buff, strlen((char*)buff), 0);
+		if ( rc==SOCKET_ERROR )
+		{
+			// TRACE("CPowerPmacDevice::Login user password send error!\n");
+			Unlock();
+			return DS_Failed;
+		}
+
+		// check for ( 0x0D + x00A )
+		tempRecv = (char *)&buff[0];
+		nCheckIndex = 0;
+		nLoopCnt = 0;
+		bDone = FALSE;
+		while(!bDone && (nLoopCnt++<10))
+		{
+			rc = recv(*(SOCKET*)m_ppmacSock, (char *)tempRecv, 1023, 0);
+			if ( rc==SOCKET_ERROR )
+			{
+				if ( WSAGetLastError()!=WSAETIMEDOUT )
+				{
+					Unlock();
+					return DS_Failed;
+				}
+			}
+
+			if ( rc!=SOCKET_ERROR )
+			{
+				tempRecv += rc;
+				nCheckIndex += rc;
+			}
+
+			if ( (nCheckIndex>=2) && (_strnicmp((char *)&buff[0], "\r\n", 2)==0 ) )
+				bDone = TRUE;
+		}
+		if ( bDone==FALSE )
+		{
+			Unlock();
+			return DS_Failed;
+		}
+
+
+/*
+		rc = recv(*(SOCKET*)m_ppmacSock, (char *)buff, 1023, 0);
+		if ( rc==SOCKET_ERROR )
+		{
+			// TRACE("CPowerPmacDevice::Login user password recv error!\n");
+			Unlock();
+			return DS_Failed;
+		}
+		buff[rc] = '\0';
+*/
+
+		// 4. Prompt 가 뜰 때까지 기다립니다.
+		tempRecv = (char *)&buff[0];
+		nCheckIndex = 0;
+		nLoopCnt = 0;
+		bDone = FALSE;
+		while(!bDone && (nLoopCnt++<10))
+		{
+// 2013.02.19 modified by LSJ
+//			rc = recv(*(SOCKET*)m_ppmacSock, (char *)buff, 1023, 0);
+			rc = recv(*(SOCKET*)m_ppmacSock, (char *)tempRecv, 1023, 0);
+			if ( rc==SOCKET_ERROR )
+			{
+				// TRACE("CPowerPmacDevice::Login user password recv Loop error!\n");
+				//2013.02.19 modified by LSJ
+				// 50 msec time out, do noting....
+				if ( WSAGetLastError()!=WSAETIMEDOUT )
+				{
+					Unlock();
+					return DS_Failed;
+				}
+			}
+
+			if ( rc!=SOCKET_ERROR )
+			{
+				tempRecv += rc;
+				nCheckIndex += rc;
+			}
+
+			//buff[rc] = '\0';
+			// TRACE("CPowerPmacDevice:Recv4, %s\n", buff);
+
+//			if ( (buff[rc-2]=='#') && (buff[rc-1]==' ') )
+			if ( (nCheckIndex>=2) && (buff[nCheckIndex-2]=='#') && (buff[nCheckIndex-1]==' ') )
+				bDone = TRUE;
+		}
+		if ( bDone==FALSE )
+		{
+			// TRACE("CPowerPmacDevice::Login, Timeout Error!\n");
+			Unlock();
+			return DS_Failed;
+		}
+
+		iTimeout = 1000;	// 1000 msec
+		rc = setsockopt( *(SOCKET*)m_ppmacSock,
+						SOL_SOCKET,
+						SO_RCVTIMEO,
+						(const char *)&iTimeout,
+						sizeof(int));
+
+		// 5. "gpascii"를 실행합니다.
+		sprintf_s((char *)buff, _countof(buff), "%s\n", "gpascii -2");
+		rc = send(*(SOCKET*)m_ppmacSock, (char*)buff, strlen((char*)buff), 0);
+		if ( rc==SOCKET_ERROR )
+		{
+			// TRACE("CPowerPmacDevice::Error, gpascii execution send error!\n");
+			Unlock();
+			return DS_Failed;
+		}
+
+		// check for ( "gpascii -2\r\nSTDIN Open for ASCII Input\r\n" )
+		tempRecv = (char *)&buff[0];
+		nCheckIndex = 0;
+		nLoopCnt = 0;
+		bDone = FALSE;
+		while(!bDone && (nLoopCnt++<20))
+		{
+			rc = recv(*(SOCKET*)m_ppmacSock, (char *)tempRecv, 1023, 0);
+			if ( rc==SOCKET_ERROR )
+			{
+				if ( WSAGetLastError()!=WSAETIMEDOUT )
+				{
+					Unlock();
+					return DS_Failed;
+				}
+			}
+
+			if ( rc!=SOCKET_ERROR )
+			{
+				tempRecv += rc;
+				nCheckIndex += rc;
+			}
+
+			if ( (nCheckIndex>=40) && (_strnicmp((char *)&buff[33], "Input\r\n", 7)==0 ) )
+				bDone = TRUE;
+		}
+		if ( bDone==FALSE )
+		{
+			Unlock();
+			return DS_Failed;
+		}
+
+		m_bConnected = TRUE;
+		Unlock();
+		return DS_Ok;
+		
+/*
+		rc = recv(*(SOCKET*)m_ppmacSock, (char *)buff, 1023, 0);
+		if ( rc==SOCKET_ERROR )
+		{
+			// TRACE("CPowerPmacDevice::Error, gpascii execution recv error!\n");
+			Unlock();
+			return DS_Failed;
+		}
+		buff[rc] = '\0';
+		// TRACE("CPowerPmacDevice:Recv5, %s\n", buff);
+
+		if ( (buff[rc-3]=='t') && (buff[rc-2]=='\r') && (buff[rc-1]=='\n') )
+		{
+			m_bConnected = TRUE;
+			Unlock();
+			return DS_Ok;
+		}
+*/
+
+	}
+
+	Unlock();
+
+	return DS_Failed;
+}
+
+UINT CPowerPmacDevice::Disconnect()
+{
+	if ( m_ppmacSock!=NULL )
+	{
+		Lock();
+
+		closesocket(*(SOCKET *)m_ppmacSock);
+		delete m_ppmacSock;
+		m_ppmacSock = NULL;
+		m_bConnected = FALSE;
+		
+		Unlock();
+
+		return DS_Ok;
+	}
+	
+	return DS_Failed;
+}
+
+UINT CPowerPmacDevice::IsConnected(PBOOL pConnected)
+{
+	*pConnected	= m_bConnected;
+	return DS_Ok;
+}
+
+UINT CPowerPmacDevice::GetResponseA(LPSTR lpCommand, LPSTR lpResponse, INT nLength)
+{
+	if ( !m_bConnected )
+		return DS_NotConnected;
+
+	// Max 255 ASCII Character can be sent & received.
+	int rc = 0;
+	int nLen = 0;
+	int iTimeout = 0;
+	PCHAR	pCommand;
+	PCHAR	pResponse;
+
+	Lock();
+
+	nLen = strlen(lpCommand);
+//	pCommand	= new CHAR[strlen(lpCommand) + 2];
+	pCommand	= new CHAR[nLen + 2];
+	pResponse	= new CHAR[nLength];
+
+	sprintf_s(pCommand, nLen + 2, "%s\n", lpCommand);
+	nLen = strlen(pCommand);
+	rc = send(*(SOCKET*)m_ppmacSock, pCommand, nLen, 0);
+	delete [] pCommand;
+
+	if ( rc==SOCKET_ERROR )
+	{
+		delete [] pResponse;
+		Unlock();
+		return DS_Failed;
+	}
+
+	int nCheckIndex = 0;
+	int nLoopCnt=0;
+	BOOL bDone = FALSE;
+	char FAR *tempRecv;
+	
+	if (!_strnicmp(lpCommand, "save", 4))
+		iTimeout = 4000;
+	else if (!_strnicmp(lpCommand, "$$$", 3))
+		iTimeout = 6000;
+	else
+		iTimeout = 1000;
+
+//	memset(lpResponse, '\0', sizeof(BYTE)*nLength);
+	rc = setsockopt(*(SOCKET*)m_ppmacSock,
+					SOL_SOCKET,
+					SO_RCVTIMEO,
+					(const char *)&iTimeout,
+					sizeof(int));
+
+	tempRecv = pResponse;
+
+//2013.02.19 modifie by LSJ
+//	while(!bDone && (nLoopCnt++<10) && (nCheckIndex < nLength) )
+	while(!bDone && (nLoopCnt++<nLength) && (nCheckIndex < nLength) )
+	{
+//		rc = recv(*(SOCKET*)m_ppmacSock, (char *)tempRecv, 1023, 0);
+		rc = recv(*(SOCKET*)m_ppmacSock, (char FAR*)tempRecv, nLength-nCheckIndex, 0);
+		if ( rc==SOCKET_ERROR )
+		{
+			// TRACE("CPowerPmacDevice::Error, getresponse recv error!\n");
+			int nError = WSAGetLastError();
+			if ( nError!=WSAETIMEDOUT )
+			{
+				//Unlock();
+				//return DS_Failed;
+				break;
+			}
+		}
+
+		if ( rc!=SOCKET_ERROR )
+		{
+			tempRecv += rc;
+			nCheckIndex += rc;
+		}
+
+//2013.02.19 modified by LSJ
+//		if ( (pResponse[nCheckIndex-3]==0x06) && (pResponse[nCheckIndex-2]=='\r') && (pResponse[nCheckIndex-1]=='\n') )
+		if ( (nCheckIndex>=3) && (pResponse[nCheckIndex-3]==0x06) && (pResponse[nCheckIndex-2]=='\r') && (pResponse[nCheckIndex-1]=='\n') )
+		{
+			// 안병건 수정
+			pResponse[nCheckIndex-3] = '\0';
+			bDone = TRUE;
+		}
+	}
+
+	if ( bDone==TRUE )
+	{
+		if (!_strnicmp(lpCommand, pResponse, strlen(lpCommand)))
+		{
+			pCommand	= strstr(pResponse, "\r");
+			if (pCommand)
+				strcpy_s(lpResponse, nLength, pCommand + 2);
+			else
+				strcpy_s(lpResponse, nLength, pResponse);
+		}
+		else
+			strcpy_s(lpResponse, nLength, pResponse);
+	}
+
+	delete [] pResponse;
+
+	if ( bDone==FALSE )
+	{
+		char tempFlushBuf[1024] = "";
+		int iTimeoutFlush = 500;
+		rc = setsockopt(*(SOCKET*)m_ppmacSock,
+						SOL_SOCKET,
+						SO_RCVTIMEO,
+						(const char *)&iTimeoutFlush,
+						sizeof(int));
+		rc = recv(*(SOCKET*)m_ppmacSock, (char *)tempFlushBuf, 1023, 0);
+		// TRACE("CPowerPmacDevice::Error, getresponse timeout Error!\n");
+		Unlock();
+		return DS_TimeOut;
+	}
+
+	Unlock();
+
+	return DS_Ok;
+}
+
+UINT CPowerPmacDevice::GetResponseW(LPWSTR lpwCommand, LPWSTR lpwResponse, INT nLength)
+{
+	UINT		uReturn;
+	PCHAR		pResponse;
+
+	pResponse	= new CHAR[nLength];
+	uReturn		= GetResponseA(CW2A(lpwCommand), pResponse, nLength);
+	wcsncpy_s(lpwResponse, nLength, CA2W(pResponse), nLength - 1);
+	delete [] pResponse;
+
+	return uReturn;
+}
+
+UINT CPowerPmacDevice::SendCommandA(LPSTR lpCommand)
+{
+	if ( !m_bConnected )
+		return DS_NotConnected;
+
+	// Max 255 ASCII Character can be sent & received.
+	int rc = 0;
+	int nLen = 0;
+	int iTimeout = 0;
+	PCHAR	pCommand;
+
+	Lock();
+
+	nLen = strlen(lpCommand);
+	pCommand = new CHAR [nLen + 2];
+//	pCommand	= new CHAR [strlen(lpCommand) + 2];
+//	sprintf_s(pCommand, strlen(pCommand) + 2, "%s\n", lpCommand);
+	sprintf_s(pCommand, nLen + 2, "%s\n", lpCommand);
+	nLen = strlen(pCommand);
+	rc = send(*(SOCKET*)m_ppmacSock, pCommand, nLen, 0);
+	delete [] pCommand;
+	if ( rc==SOCKET_ERROR )
+	{
+		Unlock();
+		return DS_Failed;
+	}
+
+	int nCheckIndex = 0;
+	int nLoopCnt=0;
+	BOOL bDone = FALSE;
+	char recvbuf[1024];
+	char *tempRecv;
+	
+	if (!_strnicmp(lpCommand, "save", 4))
+		iTimeout = 4000;
+	else if (!_strnicmp(lpCommand, "$$$", 3))
+		iTimeout = 6000;
+	else
+		iTimeout = 1000;
+
+	memset(recvbuf, '\0', sizeof(BYTE)*1024);
+	rc = setsockopt(*(SOCKET*)m_ppmacSock,
+					SOL_SOCKET,
+					SO_RCVTIMEO,
+					(const char *)&iTimeout,
+					sizeof(int));
+
+	tempRecv = recvbuf;
+
+	while(!bDone && (nLoopCnt++<10) && (nCheckIndex<1023) )
+	{
+		rc = recv(*(SOCKET*)m_ppmacSock, (char *)tempRecv, 1023-nCheckIndex, 0);
+		if ( rc==SOCKET_ERROR )
+		{
+			// TRACE("CPowerPmacDevice::Error, getresponse recv error!\n");
+			int nError = WSAGetLastError();
+			if ( nError!=WSAETIMEDOUT )
+			{
+				//Unlock();
+				//return DS_Failed;
+				break;
+			}
+		}
+
+		if ( rc!=SOCKET_ERROR )
+		{
+			tempRecv += rc;
+			nCheckIndex += rc;
+		}
+
+//2013.02.19 modified by LSJ
+//		if ( (recvbuf[nCheckIndex-3]==0x06) && (recvbuf[nCheckIndex-2]=='\r') && (recvbuf[nCheckIndex-1]=='\n') )
+		if ( (nCheckIndex>=3) && (recvbuf[nCheckIndex-3]==0x06) && (recvbuf[nCheckIndex-2]=='\r') && (recvbuf[nCheckIndex-1]=='\n') )
+		{
+			bDone = TRUE;
+		}
+	}
+	if ( bDone==FALSE )
+	{
+		char tempFlushBuf[1024] = "";
+		int iTimeoutFlush = 500;
+		rc = setsockopt(*(SOCKET*)m_ppmacSock,
+						SOL_SOCKET,
+						SO_RCVTIMEO,
+						(const char *)&iTimeoutFlush,
+						sizeof(int));
+		rc = recv(*(SOCKET*)m_ppmacSock, (char *)tempFlushBuf, 1023, 0);
+		// TRACE("CPowerPmacDevice::Error, getresponse timeout Error!\n");
+		Unlock();
+		return DS_TimeOut;
+	}
+
+	Unlock();
+	return DS_Ok;
+}
+
+UINT CPowerPmacDevice::SendCommandW(LPWSTR lpwCommand)
+{
+	return	SendCommandA(CW2A(lpwCommand));
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// private
+///////////////////////////////////////////////////////////////////////////////
+
+VOID CPowerPmacDevice::Lock()
+{
+	if ( m_hMutex )
+		WaitForSingleObject(m_hMutex, INFINITE);
+}
+
+VOID CPowerPmacDevice::Unlock()
+{
+	if ( m_hMutex )
+		ReleaseMutex(m_hMutex);
+}

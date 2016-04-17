@@ -1,0 +1,12 @@
+LIBRARY		"POWERPMAC"
+
+EXPORTS
+	DTKPowerPmacOpen	@1001
+	DTKPowerPmacClose	@1002
+	DTKConnect			@1003
+	DTKDisconnect		@1004
+	DTKIsConnected		@1005
+	DTKGetResponseA		@1006
+	DTKGetResponseW		@1007
+	DTKSendCommandA		@1008
+	DTKSendCommandW		@1009

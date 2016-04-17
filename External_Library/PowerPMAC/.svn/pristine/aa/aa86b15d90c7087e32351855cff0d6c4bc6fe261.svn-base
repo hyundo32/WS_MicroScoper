@@ -1,0 +1,97 @@
+// PowerPmac.cpp : DLL 응용 프로그램을 위해 내보낸 함수를 정의합니다.
+//
+
+#include "stdafx.h"
+#include "PowerPmac.h"
+#include "DeviceFactory.h"
+
+CDeviceFactory	g_pDeviceFactory;
+
+UINT	WINAPI DTKPowerPmacOpen(DWORD dwIPAddress, INT nPortNo)
+{
+	return g_pDeviceFactory.AddPowerPmacDevice(dwIPAddress, nPortNo);
+}
+
+// 라이브리리 클로즈
+UINT	WINAPI DTKPowerPmacClose(UINT uDeviceID)
+{
+	return g_pDeviceFactory.DeletePowerPmacDevice(uDeviceID);
+}
+
+UINT WINAPI DTKConnect(UINT uDeviceID)
+{
+	CPowerPmacDevice*	pPowerPmacDevice;
+
+	pPowerPmacDevice	= g_pDeviceFactory.GetPowerPmacDevice(uDeviceID);
+	if (pPowerPmacDevice)
+		return pPowerPmacDevice->Connect();
+	else
+		return DS_InvalidDevice;
+}
+
+UINT WINAPI DTKDisconnect(UINT uDeviceID)
+{
+	CPowerPmacDevice*	pPowerPmacDevice;
+
+	pPowerPmacDevice	= g_pDeviceFactory.GetPowerPmacDevice(uDeviceID);
+	if (pPowerPmacDevice)
+		return pPowerPmacDevice->Disconnect();
+	else
+		return DS_InvalidDevice;
+}
+
+UINT WINAPI DTKIsConnected(UINT uDeviceID, PBOOL pConnected)
+{
+	CPowerPmacDevice*	pPowerPmacDevice;
+
+	pPowerPmacDevice	= g_pDeviceFactory.GetPowerPmacDevice(uDeviceID);
+	if (pPowerPmacDevice)
+		return pPowerPmacDevice->IsConnected(pConnected);
+	else
+		return DS_InvalidDevice;
+}
+
+UINT WINAPI DTKGetResponseA(UINT uDeviceID, LPSTR lpCommand, LPSTR lpResponse, INT nLength)
+{
+	CPowerPmacDevice*	pPowerPmacDevice;
+
+	pPowerPmacDevice	= g_pDeviceFactory.GetPowerPmacDevice(uDeviceID);
+	if (pPowerPmacDevice)
+		return pPowerPmacDevice->GetResponseA(lpCommand, lpResponse, nLength);
+	else
+		return DS_InvalidDevice;
+}
+
+UINT WINAPI DTKGetResponseW(UINT uDeviceID, LPWSTR lpwCommand, LPWSTR lpwResponse, INT nLength)
+{
+	CPowerPmacDevice*	pPowerPmacDevice;
+
+	pPowerPmacDevice	= g_pDeviceFactory.GetPowerPmacDevice(uDeviceID);
+	if (pPowerPmacDevice)
+		return pPowerPmacDevice->GetResponseW(lpwCommand, lpwResponse, nLength);
+	else
+		return DS_InvalidDevice;
+}
+
+
+UINT WINAPI DTKSendCommandA(UINT uDeviceID, LPSTR lpCommand)
+{
+	CPowerPmacDevice*	pPowerPmacDevice;
+
+	pPowerPmacDevice	= g_pDeviceFactory.GetPowerPmacDevice(uDeviceID);
+	if (pPowerPmacDevice)
+		return pPowerPmacDevice->SendCommandA(lpCommand);
+	else
+		return DS_InvalidDevice;
+}
+
+UINT WINAPI DTKSendCommandW(UINT uDeviceID, LPWSTR lpwCommand)
+{
+	CPowerPmacDevice*	pPowerPmacDevice;
+
+	pPowerPmacDevice	= g_pDeviceFactory.GetPowerPmacDevice(uDeviceID);
+	if (pPowerPmacDevice)
+		return pPowerPmacDevice->SendCommandW(lpwCommand);
+	else
+		return DS_InvalidDevice;
+}

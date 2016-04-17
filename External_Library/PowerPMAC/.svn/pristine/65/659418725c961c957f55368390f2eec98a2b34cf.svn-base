@@ -1,0 +1,82 @@
+#ifndef	__FSP_REF_OBJECT_H__
+#define	__FSP_REF_OBJECT_H__
+
+//#include "FSPTypes.h"
+#include <string>
+
+typedef unsigned long   EtREFIID;
+
+class IFSPRefObject
+{
+public:
+    IFSPRefObject() {}
+    virtual ~IFSPRefObject() {}
+
+public:
+    virtual short	AddRef() = 0;
+    virtual void	Release() = 0;
+    virtual short	GetRefCount() = 0;
+
+    //  return 0:   error
+    //  return 1:   success
+    virtual long    QueryInterface(EtREFIID uIID, void **ppObj) = 0;
+};
+
+#define IMPLE_REF_OBJECT_LEVEL0 \
+    virtual short	AddRef()                {return CFSPRefObject::AddRef(); }          \
+    virtual void	Release()               {CFSPRefObject::Release(); }                \
+    virtual short	GetRefCount()           {return CFSPRefObject::GetRefCount(); }
+
+#define IMPLE_REF_OBJECT_LEVEL1 \
+    virtual short	AddRef()                {return CFSPRefObject::AddRef(); }          \
+    virtual void	Release()               {CFSPRefObject::Release(); }                \
+    virtual short	GetRefCount()           {return CFSPRefObject::GetRefCount(); }     \
+    virtual long	QueryInterface(EtREFIID uIID, void **ppObj)                         \
+{return CFSPRefObject::QueryInterface(uIID, ppObj); }
+class CFSPRefObject
+{
+public:
+    CFSPRefObject(void);
+    CFSPRefObject(const char* strObjectName);
+
+    virtual ~CFSPRefObject(void);
+
+public:
+    // ³¯Â¥: 2009/8/24
+    // ÀÛ¼º: ±è¸¸¼ö(kmansoo@nate.com)
+    // ¼³¸í: ÀÏ¹Ý °´Ã¼¸¦ ÂüÁ¶Çü °´Ã¼·Î ¸¸µê
+    template <class _PInterface>
+    static bool createInstance(_PInterface** ppv);    
+
+public:
+    virtual short AddRef();
+    virtual void    Release();
+    virtual short	GetRefCount();
+
+    virtual long    QueryInterface(EtREFIID uIID, void** ppObj);
+
+public:
+    const std::string& GetRefObjectName() const;
+
+protected:
+    void        SetRefObjectName(const char* strObjectName);
+
+protected:
+    short     _nRefCounts;
+    std::string _strObjectName;
+};
+
+#endif
+
+/* ====================================================================
+ *  File: FSPRefObject.h
+ *
+ *  Desc:
+ *     ÂüÁ¶Çü °´Ã¼
+ *  
+ *  Author:
+ *      ±è¸¸¼ö(kmansoo@nate.com)
+ *
+ *  Date:
+ *      2007/11/20
+ */
